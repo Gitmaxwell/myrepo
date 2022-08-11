@@ -1,0 +1,310 @@
+---
+title: "01 Data Wrangling"
+output: html_document
+date: '2022-08-01'
+---
+
+Setup and required packages
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(httr)
+library(jsonlite)
+library(ckanr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(lastools)
+library(ggplot2)
+library(data.table)
+```
+
+
+## Background
+In 2020 the Queensland Govenrment changed the way confidentiality applies to reports, and as a result the Geological Survey of Queensland (GSQ) was able to release a range of reports which were previously embargoed to the public. These reports include Mining Development Lease (MDL) annual reports which can contain a significant amount of data including:
+
+* Borehole location and associated downhole geology data
+
+* Geophysical log data
+
+* Assay/coal quality analysis data
+
+These reports can be accessed through an API which is provided by the GSQ. The GSQ provides guidance on how to access reports through the API on its [github page](https://github.com/geological-survey-of-queensland).
+
+The GSQ heavily relies on [CKAN](https://ckan.org/), and therefore we will need to use the package ckanr to interact with and retrieve information from the database.  
+
+## Task 1
+
+Find the download url's for all files in the CKAN database report "cr073851".
+
+To do this we need to set up ckanr to link to the GSQ CKAN database and query the database for details relating to cr073851.
+
+I will get you started..
+
+### Link to GSQ website
+
+```{r}
+url_site <- "https://geoscience.data.qld.gov.au/"
+ckanr_setup(url = url_site)
+```
+
+### Retrive package resource details from CKAN database
+
+Write a function to store the package resources in a data frame. The data frame will contains the download url and contents of the files. You should end up with a data frame containing 20 obs, and 19 variables.
+
+```{r}
+pkg <- package_show("cr073851") #this provides a list of all the contents of the cr073851 report.
+
+pkg$resources #these are the resources (e.g files and url locations) of the report. Reshape this into a data frame.
+
+#SOLUTION
+get_resource_detials <- function(x)
+{
+d <-  data.frame(content=unlist(pkg$resources[[x]])) 
+d$var <- row.names(d)
+d_w <- d %>% 
+  pivot_wider(names_from = var, values_from = content)
+return(d_w)
+  
+}
+
+l <- lapply(1:length(pkg$resources), get_resource_detials)
+dt <- data.table::rbindlist(l, fill=TRUE)
+
+```
+
+## Task 2. 
+
+Download the cr073851 resources to a sub folder.
+
+Using the data frame created in Task 1, download all the resources (files) associated with cr073851. Store them in a sub-folder named reports/cr073851.
+
+TIP! Use the `resource::description` and `format` columns as the file name
+
+```{r}
+## Create the folder to store the contents in
+dir.create("./reports")
+dir.create("./reports/cr073851")
+
+#now download all the data into the folder. Tip use Use the columns resource::description and resource:format columns as the file name
+
+##SOLUTION
+fn_download <- function(x)
+{
+dt <- subset(dt, dt$download_url ==x)  
+download.file(url = dt$download_url, destfile = paste("./reports/cr073851/",dt$`resource:description`,".", dt$format,sep=""))  
+}
+
+lapply(dt$download_url,fn_download)
+```
+
+Now unzip the Appendix named "APPENDIX C - GEOPHYSICAL LOGS.ZIP" into the directory "./reports/cr073851/"
+
+```{r}
+##SOLUTION
+unzip("./reports/cr073851/APPENDIX C - GEOPHYSICAL LOGS.ZIP",exdir="./reports/cr073851/")
+```
+
+The unziped folder should be called "Las all"
+
+## Task 3. Standardise (make consistent) the data sets
+
+In this section we need to standardize (make consistent) data of interest. We will load in the data sets we want to work with, and then rename the columns to conform to the [CoalLog](https://www.ausimm.com/insights-and-resources/resources/codes-and-standards/coallog/) standard.
+
+
+### Load the data
+
+1. Load in the data set named "APPENDIX A - DRILL HOLE LOCATIONS.TXT" and call the data frame "header".
+
+2. Load in the data set named "APPENDIX B - ENGLISH LOGS.TXT" and call the data frame "lith".
+
+3. Load in the data set named "APPENDIX D - COAL QUALITY RAW.TXT" and call the data frame "raw_cq".
+
+Tip, use "readr::read_delim" with the option na = c("", "NA","NULL"). 
+
+```{r}
+#SOLUTION
+header <- readr::read_delim("./reports/cr073851/APPENDIX A - DRILL HOLE LOCATIONS.TXT", na = c("", "NA","NULL"))
+lith <- readr::read_delim("./reports/cr073851/APPENDIX B - ENGLISH LOGS.TXT",na = c("", "NA","NULL"))
+raw_cq <- readr::read_delim("./reports/cr073851/APPENDIX D - COAL QUALITY RAW.TXT",na = c("", "NA","NULL"))
+
+```
+
+### Prepare the header data
+Perform the following steps on the header data frame. _Store them all in a new data frame named "header_clean"_
+
+1. Select the "PROJECT_DESCR", "SITE_ID", "EASTING", "NORTHING","HEIGHT","END_DEPTH","DRILL_END_DATE","SITE_TYPE_DESCR", "HOLE_REASON_DESCR" columns (these are the only columns of interest for our study)
+
+2. Rename the columns to conform to CoalLog standard column names (Project_Name=PROJECT_DESCR,Borehole_Name=SITE_ID, Easting=EASTING, Northing=NORTHING, Elevation=HEIGHT, Total_Depth=END_DEPTH,Complete_Date=DRILL_END_DATE, Borehole_Type=SITE_TYPE_DESCR, Borehole_Purpose_1=HOLE_REASON_DESCR)
+
+3. Remove rows which don't have an Easting or an Northing
+
+4. Capitalize all values in the Borehole_Name column
+
+```{r}
+#SOLUTION
+header_clean <- header %>% 
+    select(PROJECT_DESCR, SITE_ID, EASTING, NORTHING,HEIGHT,END_DEPTH,DRILL_END_DATE,SITE_TYPE_DESCR,HOLE_REASON_DESCR) %>% 
+  rename(Project_Name=PROJECT_DESCR,Borehole_Name=SITE_ID, Easting=EASTING, Northing=NORTHING, Elevation=HEIGHT, Total_Depth=END_DEPTH,Complete_Date=DRILL_END_DATE, Borehole_Type=SITE_TYPE_DESCR, Borehole_Purpose_1=HOLE_REASON_DESCR) %>% 
+  filter(!is.na(Easting) | !is.na(Northing)) %>% 
+  mutate(Borehole_Name = toupper(Borehole_Name))
+```
+
+
+The resultant data frame should have 287 obs, and 10 variables.
+
+### Prepare the Lith data
+Perform the following steps on the "lith" data frame. _Store them all in a new data frame named "lith_clean"_
+
+1. Select the "PROJECT_DESCR", "BHID", "DEPTH_FROM", "DEPTH_TO", "LITHOLOGY", "WEATHERING", "STRENGTH", "ADJ1", "ADJ2", "ADJ3", "ADJ4" columns (these are the only columns of interest for our study)
+
+2. Rename the columns to conform to CoalLog format (Project_Name=PROJECT_DESCR, Borehole_Name=BHID, From_Depth=DEPTH_FROM,	To_Depth=DEPTH_TO, Litho_Type=LITHOLOGY, Weathering=WEATHERING, Est_Strength = STRENGTH, Adjective_1=ADJ1, Adjective_2=ADJ2, Adjective_3=ADJ3, Adjective_4=ADJ4)
+
+3. Capitalize all values in the Borehole_Name column
+
+
+
+The resultant data frame should have 7356 obs, and 15 variables.
+
+
+```{r}
+##SOLUTION
+lith_clean <- lith %>% select(PROJECT_DESCR,BHID,DEPTH_FROM,DEPTH_TO,LITHOLOGY,WEATHERING,STRENGTH,ADJ1,ADJ2,ADJ3,ADJ4) %>% 
+  rename(Project_Name=PROJECT_DESCR, Borehole_Name=BHID, From_Depth=DEPTH_FROM,	To_Depth=DEPTH_TO, Litho_Type=LITHOLOGY, Weathering=WEATHERING, Est_Strength = STRENGTH, Adjective_1=ADJ1, Adjective_2=ADJ2, Adjective_3=ADJ3, Adjective_4=ADJ4)  %>% 
+mutate(Borehole_Name = toupper(Borehole_Name))
+```
+
+
+### Prepare the raw cq data
+
+Perform the following steps on the "raw_cq" data frame. _Store them in a new data frame named "raw_cq_clean"_
+
+1. Select the "holeid", "sanor", "workr", "rdenr", "ashr", "volmr","imoir","fixcr" columns (these are the only columns of interest)
+
+2. Rename the selected columns to Coallog standard (Borehole_Name = holeid, Sample_No= sanor, Seam=workr, RD_ad_gpcm3=rdenr, Ash_ad_pct=ashr, VM_ad_pct=volmr, MIAS_ad_pct=imoir, FC_ad_pct=fixcr).
+
+3. Remove all rows which have missing data from any column.
+
+4. Add a new variable "sum_prox" which is the total of "Ash_ad_pct","VM_ad_pct","MIAS_ad_pct" & "FC_ad_pct". 
+
+5. Remove all rows where "sum_prox" does not add to 100. 
+
+6. Remove data which have less than 30 data points per Seam. Do this by adding a new column called "N" which counts the number of samples grouped by Seam (e.g use group_by (Seam) in conjunction with n.()).
+
+7. Capitalize all values in the Borehole_Name column
+
+
+The resultant data frame should have 287 obs, and 10 variables.
+
+```{r}
+##SOLUTION
+raw_cq_clean <- raw_cq %>% 
+  select(holeid,sanor, workr, rdenr, ashr, volmr,imoir,fixcr) %>% 
+  rename(Borehole_Name = holeid,
+         Sample_No= sanor, 
+         Seam=workr,
+         RD_ad_gpcm3=rdenr,
+         Ash_ad_pct=ashr,
+         VM_ad_pct=volmr,
+         MIAS_ad_pct=imoir,
+         FC_ad_pct=fixcr) %>% 
+  drop_na() %>% 
+  mutate(sum_prox = Ash_ad_pct+VM_ad_pct+MIAS_ad_pct+FC_ad_pct) %>% 
+  filter(sum_prox==100) %>% 
+  group_by(Seam) %>% 
+  mutate(N=n()) %>% 
+  filter(N >30) %>% 
+  mutate(Borehole_Name = toupper(Borehole_Name))
+```
+
+
+### Save the standardized data sets
+
+Save each of the standardized data sets as an rds file into the 'data' folder. Use the name of the object as the file name (for example save header_clean as header_clean.rds)
+
+```{r}
+dir.create("./data")
+#SOLUTION
+saveRDS(header_clean,"./data/header_clean.rds")
+saveRDS(lith_clean,"./data/lith_clean.rds")
+saveRDS(raw_cq_clean,"./data/raw_cq_clean.rds")
+```
+
+
+## Task 4. Load the contents of the LAS files into a data frame
+
+In this section we need to load all the LAS files into a data frame and standardize the mnemonics.
+
+Do this using the following steps:
+
+1. Using the function below load into memory all the LAS files from the folder "./reports/cr073851/Las all/" (name the list "las")
+
+2. Combine the resultant list of data frames into a single data frame called "las_df" (tip use data.table::rbindlist with fill=TRUE)
+
+3. Remove columns from las_df which have no name (these represent import errors caused by bad LAS files)
+
+4. Add a new column to las_df called "Borehole_Name" by replicating the WELL column (e.g mutate( Borehole_Name=WELL))  
+
+5. Note that all the values in the Borehole_Name column have either DENSITY, DEVIATION or VELOCITY as a suffix. Remove these suffixs from the values in the Borehole_Name column (tip use str_remove) and remove any leading or trailing white spaces. 
+
+6. Capitalize all values in the Borehole_Name column 
+
+7. Select columns of interest (Borehole_Name,DEPT,GAMMA,GAMM,CALIPERL,CALI,LSD,SSD,COMP,`DEN(LS)`,`DEN(SS)`,VELOCITY,RES,`RES(SG)C`,`RES(16N)`,`RES(64N)`)
+
+8. Recode columns so that GAMMA = "GAMMA_API", GAMM= "GAMMA_API", LSD= "DENL_GCC",`DEN(LS)` = "DENL_GCC",SSD = "DENB_GCC", `DEN(SS)` = "DENB_GCC",CALIPERL = "CADE_MM",CALI="CADE_CM", COMP="CODE_GCC", VELOCITY="VEL_MS",RES="FE1_OHMM",`RES(SG)C`= "FE1_OHMM",`RES(16N)`="FE1_OHMM",`RES(64N)`="FE2_OHMM") (TIP use pitvot_longer and recode)
+
+9. Using the provided limits (gphy_limits), remove any out of limits values (TIP use join and filter)
+
+10. Return the data frame to wide format, using mean as the aggregation function (TIP use  pivot_wider(id_cols = c(Borehole_Name,DEPT), values_fn =  ~mean(.x, na.rm = TRUE)))
+
+11. Save the data to an rds file (in the data sub folder) named "las_df_clean.rds"
+
+
+```{r}
+
+las_to_df <- function(x)
+{
+#l <- lastools::read_las("./reports/cr073851/Las all/001-LADEN.LAS")
+l <- lastools::read_las(x)
+well_df <- l$WELL
+log_df <- l$LOG
+log_df$WELL <- subset(well_df,well_df$MNEM=="WELL")$VALUE
+return(log_df)
+}
+
+gphy_limits = data.frame(name=c("CADE_CM","CADE_MM","CODE_GCC","DENB_GCC","DENL_GCC","FE1_OHMM","FE2_OHMM","GAMMA_API","VEL_MS"),min_value=c(50,500,0.7,0.7,0.7,0,0,0,0), max_value=c(200,2000,4,4,4,10000,10000,550,20000))
+
+
+#SOLUTION
+las <- lapply(list.files("./reports/cr073851/Las all/", full.names = TRUE),las_to_df)
+
+#merge the list of data frames
+las_df <- data.table::rbindlist(las, fill=TRUE)
+#convert back to a data frame
+las_df <- as.data.frame(las_df)
+
+#remove unnamed columns
+keep.cols <- names(las_df) %in% NA
+las_df <- las_df[! keep.cols] 
+
+
+#Clean up the WELL name
+las_df  <- las_df %>% 
+  mutate(Borehole_Name =str_remove(WELL,"DENSITY")) %>% 
+  mutate(Borehole_Name =str_remove(Borehole_Name,"DEVIATION")) %>% 
+  mutate(Borehole_Name =str_remove(Borehole_Name,"VELOCITY")) %>% 
+  mutate(Borehole_Name =str_trim(Borehole_Name,"both")) %>% 
+  mutate(Borehole_Name = toupper(Borehole_Name)) %>% 
+  select(Borehole_Name,DEPT,GAMMA,GAMM,CALIPERL,CALI,LSD,SSD,COMP,`DEN(LS)`,`DEN(SS)`,`DEN(LS).1`,`DEN(SS).1`,VELOCITY,RES,`RES(SG)C`,`RES(16N)`,`RES(64N)`) %>% 
+  pivot_longer(cols = !c(Borehole_Name,DEPT), values_drop_na = TRUE) %>% 
+  filter(value >0) %>% 
+  mutate(name = recode(name,GAMMA = "GAMMA_API", GAMM= "GAMMA_API", LSD= "DENL_GCC",`DEN(LS)` = "DENL_GCC",SSD = "DENB_GCC", `DEN(SS)` = "DENB_GCC",CALIPERL = "CADE_MM",CALI="CADE_CM", COMP="CODE_GCC", VELOCITY="VEL_MS",RES="FE1_OHMM",`RES(SG)C`= "FE1_OHMM",`RES(16N)`="FE1_OHMM",`RES(64N)`="FE2_OHMM")) %>% 
+  left_join(gphy_limits, by="name") %>% 
+  filter(value > min_value & value < max_value) %>% 
+  pivot_wider(id_cols = c(Borehole_Name,DEPT), values_fn =  ~mean(.x, na.rm = TRUE))
+
+#las_df %>% 
+#  ggplot(aes(1,value)) + geom_boxplot() + facet_wrap(~name, scales = "free")
+saveRDS(las_df,"./data/las_df_clean.rds")  
+```
+
