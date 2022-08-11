@@ -1,0 +1,45 @@
+---
+title: "02 Exploratory Data Analysis"
+output: html_document
+date: "2022-08-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(data.table)
+```
+
+```{r}
+lith_clean <- readRDS("./data/lith_clean.rds")
+las_df_clean <- readRDS("./data/las_df_clean.rds")
+setDT(lith_clean)
+setDT(las_df_clean)
+lith_clean$Lith_From_Depth <- lith_clean$From_Depth
+lith_clean$Lith_To_Depth_m <- lith_clean$To_Depth
+las_df_clean$Gphy_Depth
+
+las_lith <- las_df_clean[lith_clean, on=.(Borehole_Name = Borehole_Name,DEPT >= From_Depth , DEPT <= To_Depth),nomatch=0]
+
+las_lith_clean <- las_lith %>% select(Borehole_Name, Lith_From_Depth,Lith_To_Depth_m,Gphy_Depth, Litho_Type,Weathering,DENL_GCC,DENL_GCC,GAMMA_API, VEL_MS,FE1_OHMM,FE2_OHMM,CADE_MM,CADE_CM)
+View(las_lith_clean)
+
+
+
+```
+
+```{r}
+
+las_df_clean %>%  pivot_longer(cols = !c(Borehole_Name,DEPT), values_drop_na = TRUE) %>%
+ggplot(aes(value)) +  facet_wrap(~name, scales = "free") +
+geom_histogram(binwidth = function(x) 2 * IQR(x) / (length(x)^(1/3))) +
+theme_bw()
+
+las_df_clean %>%  pivot_longer(cols = !c(Borehole_Name,DEPT), values_drop_na = TRUE) %>%
+ggplot(aes(y=value)) + geom_boxplot() +  facet_wrap(~name, scales = "free") + theme_bw()
+
+las_df_clean %>%  pivot_longer(cols = !c(Borehole_Name,DEPT), values_drop_na = TRUE) %>%
+group_by(name) %>%
+summarise(N=n(), mean = round(mean(value),2), min=round(min(value),2),max=round(max(value),2), sd=round(sd(value),2))
+```
+
